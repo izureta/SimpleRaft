@@ -302,17 +302,13 @@ class Node:
             if action == "create":
                 if key not in result_dict:
                     result_dict[key] = value
-
             elif action == "update":
                 if key in result_dict:
                     result_dict[key] = value
-
             elif action == "delete":
                 if key in result_dict:
                     del result_dict[key]
-        return result_dict[key]
-
-
+        return result_dict.get(key, "Error")
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -320,22 +316,37 @@ class RequestHandler(BaseHTTPRequestHandler):
         node = self.server.node
         parsed_path = urlparse(self.path)
         query = parse_qs(parsed_path.query)
-        data = {
-            'node_id': node.node_id,
-            'current_term': node.current_term,
-            'voted_for': node.voted_for,
-            'log': node.log,
-            'current_role': node.current_role,
-            'votes_received': list(node.votes_received),
-            'sent_length': node.sent_length,
-            'acked_length': node.acked_length,
-            'current_leader': node.current_leader
-        }
         if parsed_path.path == '/status':
+            node_data = {
+                'node_id': node.node_id,
+                'current_term': node.current_term,
+                'voted_for': node.voted_for,
+                'log': node.log,
+                'current_role': node.current_role,
+                'votes_received': list(node.votes_received),
+                'sent_length': node.sent_length,
+                'acked_length': node.acked_length,
+                'current_leader': node.current_leader
+            }
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
-            self.wfile.write(bytes(json.dumps(data), 'utf-8'))
+            self.wfile.write(bytes(json.dumps(node_data), 'utf-8'))
+        elif parsed_path.path == '/read':
+            content_length = int(self.headers['Content-Length'])
+            get_data = json.loads(self.rfile.read(content_length))
+            response = self.server.node.on_read(
+                get_data['key']
+            )
+            if response == 'Error':
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+            else:
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+            self.wfile.write(bytes(json.dumps(response), 'utf-8'))
         else:
             self.send_error(404)
 
@@ -382,14 +393,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.server.node.on_broadcast_request(
                 'create ' + str(post_data['key'])
             )
-        elif parsed_path.path == '/read':
-            response = self.server.node.on_read(
-                post_data['key']
-            )
-        elif parsed_path.path == '/update':
-            self.server.node.on_broadcast_request(
-                'update ' + str(post_data['key']) + ' ' + str(post_data['value'])
-            )
         elif parsed_path.path == '/delete':
             self.server.node.on_broadcast_request(
                 'delete ' + str(post_data['key'])
@@ -397,8 +400,19 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
-        if parsed_path.path == '/read':
-            self.wfile.write(bytes(json.dumps(response), 'utf-8'))
+    
+    def do_PUT(self):
+        node = self.server.node
+        parsed_path = urlparse(self.path)
+        content_length = int(self.headers['Content-Length'])
+        put_data = json.loads(self.rfile.read(content_length))
+        if parsed_path.path == '/update':
+            self.server.node.on_broadcast_request(
+                'update ' + str(put_data['key']) + ' ' + str(put_data['value'])
+            )
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
 
 if __name__ == "__main__":
     import sys
